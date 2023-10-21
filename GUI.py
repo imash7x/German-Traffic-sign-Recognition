@@ -1,45 +1,103 @@
-import tkinter as tk
-from tkinter import filedialog
-from PIL import ImageTk, Image
 import cv2
+from tkinter import filedialog
+import tkinter as tk
+from PIL import Image, ImageTk
+import os
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 
-# Load the model
-model = tf.keras.models.load_model('model.h5')
+data = pd.read_csv("label_names.csv")
+reconstructed_model = tf.keras.models.load_model('model.h5')
 
-# Create a Tkinter GUI
-root = tk.Tk()
-root.title("Traffic Sign Detection")
-canvas = tk.Canvas(root, width=600, height=400)
-canvas.pack()
+cap = None  # Global variable for video capture
+video_running = False  # Flag variable to track video feed status
 
-# Define a function to select an image using the file dialog and display it on the canvas
+def classify_image(image):
+    resized = cv2.resize(image, (50, 50))
+
+    result = np.expand_dims(resized, axis=0)
+
+    result = reconstructed_model.predict(result)
+    rslt = np.argmax(result)
+
+    matched_row = data[data.index == rslt]
+    if not matched_row.empty:
+        name = matched_row['SignName'].values[0]
+        result_text.set(f"The Traffic Sign is: {name}, ClassId:{rslt}")
+    else:
+        result_text.set(f"No matching ClassId found: {rslt}")
+   
+    image = Image.fromarray(image)
+    image.thumbnail((400, 400))
+    image = ImageTk.PhotoImage(image)
+    video_label.configure(image=image)
+    video_label.image = image
+
+def capture_frame():
+    if video_running:
+        ret, frame = cap.read()
+        if ret:
+            image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            classify_image(image)
+
+        video_label.after(5, capture_frame)
+
 def select_image():
-    file_path = filedialog.askopenfilename()
-    image = Image.open(file_path)
-    image = image.resize((600, 400))
-    photo = ImageTk.PhotoImage(image)
-    canvas.create_image(0, 0, image=photo, anchor=tk.NW)
-    detect_sign(file_path)
+    file_path = filedialog.askopenfilename(filetypes=[("PNG files", "*.png")])
+    if file_path:
+        if video_running:
+            stop_video()
+        image = cv2.imread(file_path)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        classify_image(image)
 
-# Define a function to detect the traffic sign in the selected image using the loaded model
-def detect_sign(file_path):
-    image = cv2.imread(file_path)
-    image = cv2.resize(image, (32, 32))
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    image = np.array(image) / 255.0
-    image = np.expand_dims(image, axis=0)
-    prediction = model.predict(image)
-    class_id = np.argmax(prediction)
-    label.configure(text=f"Traffic sign detected: {class_id}")
 
-# Create a button widget
-button = tk.Button(root, text="Select Image", command=select_image)
-button.pack()
+def capture_image():
+    if video_running:
+        stop_video()
+    cap = cv2.VideoCapture(0)
+    ret, frame = cap.read()
+    if ret:
+        image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        classify_image(image)
+        cv2.imwrite("captured_image.png", frame)
+    cap.release()
+    
+def start_video():
+    global cap, video_running
+    if not video_running:
+        cap = cv2.VideoCapture(0)
+        video_running = True
+        capture_frame()
 
-label = tk.Label(root, text="")
-label.pack()
+def stop_video():
+    global cap, video_running
+    if video_running:
+        cap.release()
+        video_running = False
 
-# Start the main event loop
+root = tk.Tk()
+root.geometry("500x600")
+root.title("ROAD SIGN DETECTION & RECOGNITION")
+
+video_label = tk.Label(root)
+video_label.pack(pady=10)
+
+select_button = tk.Button(root, text="Select Image", command=select_image, width= 15)
+select_button.pack(pady=5)
+
+capture_button = tk.Button(root, text="Capture Image", command=capture_image, width= 15)
+capture_button.pack(pady=5)
+
+start_button = tk.Button(root, text="Start Video", command=start_video, width= 15)
+start_button.pack(pady=5)
+
+stop_button = tk.Button(root, text="Stop Video", command=stop_video, width= 15)
+stop_button.pack(pady=5)
+
+result_text = tk.StringVar()
+result_label = tk.Label(root, textvariable=result_text, font=('Arial', 10), wraplength=400)
+result_label.pack(pady=10)
+
 root.mainloop()
